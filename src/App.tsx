@@ -6,9 +6,9 @@ import {
   endOfMonth,
   endOfWeek,
   format,
-  isSameDay,
   isSameMonth,
   isToday,
+  isWeekend,
   parseISO,
   startOfMonth,
   startOfWeek,
@@ -22,12 +22,14 @@ import {
   Leaf,
   Plus,
   RotateCcw,
+  Star,
   Upload,
 } from "lucide-react"
 
 import { DayEditor } from "@/components/day-editor"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { getNurembergHoliday } from "@/lib/bavarian-holidays"
 import { downloadData, emptyData, isValidImport, loadData, saveData, type DaytrackerData } from "@/lib/storage"
 import { cn } from "@/lib/utils"
 
@@ -264,6 +266,21 @@ export default function App() {
                 </div>
                 <span className="text-xs text-muted-foreground">Excellent</span>
               </div>
+              <span className="hidden h-4 w-px bg-border md:block" />
+              <div className="hidden items-center gap-3 text-xs text-muted-foreground md:flex">
+                <span className="flex items-center gap-1.5">
+                  <span className="relative h-4 w-6 overflow-hidden rounded border bg-white/70">
+                    <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-sky-500" />
+                  </span>
+                  Weekend divider
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="relative h-4 w-6 overflow-hidden rounded border bg-white/70">
+                    <span className="absolute inset-y-0 right-0 w-1 bg-violet-500" />
+                  </span>
+                  Public holiday · Nuremberg
+                </span>
+              </div>
             </div>
 
             <div className="flex items-center gap-4 text-xs sm:text-sm">
@@ -280,8 +297,14 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-7 px-1 pb-2 sm:px-2">
-            {weekdays.map((weekday) => (
-              <div key={weekday} className="text-center text-[10px] font-semibold tracking-[0.16em] text-muted-foreground sm:text-xs">
+            {weekdays.map((weekday, index) => (
+              <div
+                key={weekday}
+                className={cn(
+                  "text-center text-[10px] font-semibold tracking-[0.16em] text-muted-foreground sm:text-xs",
+                  index > 4 && "text-sky-700/70",
+                )}
+              >
                 {weekday}
               </div>
             ))}
@@ -294,6 +317,14 @@ export default function App() {
               const outside = !isSameMonth(day, month)
               const score = entry?.score ?? null
               const notePreview = entry?.note.trim()
+              const weekend = isWeekend(day)
+              const holiday = getNurembergHoliday(day)
+              const calendarStatus = [
+                weekend ? "weekend" : null,
+                holiday?.name ?? null,
+              ]
+                .filter(Boolean)
+                .join(", ")
 
               return (
                 <button
@@ -302,14 +333,14 @@ export default function App() {
                   disabled={!hasLoaded || saving}
                   onClick={() => openDay(day)}
                   className={cn(
-                    "group relative flex min-h-24 flex-col border-border/70 p-2 text-left transition-all focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:min-h-28 sm:p-3",
+                    "group relative flex min-h-24 flex-col overflow-hidden border-border/70 p-2 text-left transition-all focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:min-h-28 sm:p-3",
                     index % 7 !== 6 && "border-r",
                     index < 35 && "border-b",
-                    outside && "bg-stone-50/40 text-muted-foreground/40",
-                    !outside && !score && "hover:bg-white/90",
+                    !score && "bg-white/45 hover:bg-white/90",
                     score && scoreBackgrounds[score - 1],
+                    outside && "text-muted-foreground/45 opacity-55",
                   )}
-                  aria-label={`${format(day, "MMMM d, yyyy")}${score ? `, score ${score}` : ", not logged"}`}
+                  aria-label={`${format(day, "MMMM d, yyyy")}${calendarStatus ? `, ${calendarStatus}` : ""}${score ? `, score ${score}` : ", not logged"}`}
                 >
                   <div className="flex w-full items-start justify-between">
                     <span
@@ -321,12 +352,24 @@ export default function App() {
                       {format(day, "d")}
                     </span>
                     {score && (
-                      <span className="flex items-center gap-1 rounded-full bg-white/65 px-1.5 py-1 text-[10px] font-bold shadow-sm backdrop-blur-sm sm:px-2 sm:text-xs">
+                      <span className="flex items-center gap-1 rounded-full bg-white/70 px-1.5 py-1 text-[10px] font-bold shadow-sm backdrop-blur-sm sm:px-2 sm:text-xs">
                         <span className={cn("h-1.5 w-1.5 rounded-full", scoreDots[score - 1])} />
                         {score}
                       </span>
                     )}
                   </div>
+
+                  {holiday && (
+                    <div
+                      className="mt-1 flex max-w-full items-center gap-1 rounded-md bg-white/70 px-1.5 py-1 text-violet-900 shadow-sm backdrop-blur-sm"
+                      title={`${holiday.name} · public holiday in Nuremberg`}
+                    >
+                      <Star className="h-3 w-3 shrink-0 fill-current" aria-hidden="true" />
+                      <span className="hidden truncate text-[10px] font-semibold leading-tight sm:inline">
+                        {holiday.name}
+                      </span>
+                    </div>
+                  )}
 
                   {notePreview ? (
                     <p className="mt-auto hidden w-full overflow-hidden text-ellipsis text-xs leading-relaxed text-foreground/65 sm:block sm:[display:-webkit-box] sm:[-webkit-box-orient:vertical] sm:[-webkit-line-clamp:2]">
@@ -340,16 +383,30 @@ export default function App() {
                     )
                   )}
                   {entry?.note && <span className="mt-auto h-1 w-1 rounded-full bg-foreground/40 sm:hidden" />}
+                  {index % 7 === 5 && (
+                    <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-0.5 bg-sky-500/80" />
+                  )}
+                  {holiday && (
+                    <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-1 bg-violet-500/90" />
+                  )}
                 </button>
               )
             })}
           </div>
 
           <div className="mt-3 flex items-center justify-between lg:hidden">
-            <div className="flex gap-1">
-              {["bg-rose-400", "bg-amber-400", "bg-yellow-300", "bg-lime-400", "bg-emerald-500"].map((color) => (
-                <span key={color} className={cn("h-2 w-5 rounded-full", color)} />
-              ))}
+            <div className="flex items-center gap-2">
+              <div className="flex gap-1" aria-label="Score scale from rough to excellent">
+                {["bg-rose-400", "bg-amber-400", "bg-yellow-300", "bg-lime-400", "bg-emerald-500"].map((color) => (
+                  <span key={color} className={cn("h-2 w-4 rounded-full", color)} />
+                ))}
+              </div>
+              <span className="relative h-4 w-5 overflow-hidden rounded border bg-white/70" title="Weekend divider">
+                <span className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-sky-500" />
+              </span>
+              <span className="relative h-4 w-5 overflow-hidden rounded border bg-white/70" title="Public holiday in Nuremberg">
+                <span className="absolute inset-y-0 right-0 w-1 bg-violet-500" />
+              </span>
             </div>
             <div className="flex gap-1">
               <Button variant="ghost" size="sm" disabled={!hasLoaded || saving} onClick={() => importRef.current?.click()}>
