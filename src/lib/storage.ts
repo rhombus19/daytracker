@@ -9,30 +9,38 @@ export type DaytrackerData = {
   days: Record<string, DayEntry>
 }
 
-const STORAGE_KEY = "daymark:data:v1"
+export const emptyData: DaytrackerData = { version: 1, days: {} }
 
-const emptyData: DaytrackerData = { version: 1, days: {} }
-
-export function loadData(): DaytrackerData {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return emptyData
-    const parsed = JSON.parse(raw) as DaytrackerData
-    if (parsed.version !== 1 || !parsed.days || typeof parsed.days !== "object") return emptyData
-    return parsed
-  } catch {
-    return emptyData
+async function apiRequest(path: string, init?: RequestInit) {
+  const response = await fetch(path, init)
+  if (!response.ok) {
+    const message = await response.text().catch(() => "")
+    throw new Error(message || `Server request failed (${response.status})`)
   }
+  return response
 }
 
-export function saveData(data: DaytrackerData) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+export async function loadData(): Promise<DaytrackerData> {
+  const response = await apiRequest("/api/data", {
+    headers: { Accept: "application/json" },
+  })
+  const parsed: unknown = await response.json()
+  if (!isValidImport(parsed)) throw new Error("The server returned invalid Daymark data")
+  return parsed
+}
+
+export async function saveData(data: DaytrackerData): Promise<void> {
+  await apiRequest("/api/data", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
 }
 
 export function isValidImport(value: unknown): value is DaytrackerData {
   if (!value || typeof value !== "object") return false
   const candidate = value as Partial<DaytrackerData>
-  if (candidate.version !== 1 || !candidate.days || typeof candidate.days !== "object") return false
+  if (candidate.version !== 1 || !candidate.days || typeof candidate.days !== "object" || Array.isArray(candidate.days)) return false
 
   return Object.entries(candidate.days).every(([date, entry]) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !entry || typeof entry !== "object") return false
@@ -40,6 +48,7 @@ export function isValidImport(value: unknown): value is DaytrackerData {
     return (
       (day.score === null || (Number.isInteger(day.score) && Number(day.score) >= 1 && Number(day.score) <= 10)) &&
       typeof day.note === "string" &&
+      day.note.length <= 2000 &&
       typeof day.updatedAt === "string"
     )
   })

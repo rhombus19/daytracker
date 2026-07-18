@@ -20,8 +20,9 @@ type DayEditorProps = {
   entry?: DayEntry
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSave: (score: number | null, note: string) => void
-  onDelete: () => void
+  onSave: (score: number | null, note: string) => void | Promise<void>
+  onDelete: () => void | Promise<void>
+  saving?: boolean
 }
 
 const scoreStyles = [
@@ -37,7 +38,7 @@ const scoreStyles = [
   "bg-teal-600 text-white border-teal-600",
 ]
 
-export function DayEditor({ date, entry, open, onOpenChange, onSave, onDelete }: DayEditorProps) {
+export function DayEditor({ date, entry, open, onOpenChange, onSave, onDelete, saving = false }: DayEditorProps) {
   const [score, setScore] = useState<number | null>(null)
   const [note, setNote] = useState("")
 
@@ -112,18 +113,18 @@ export function DayEditor({ date, entry, open, onOpenChange, onSave, onDelete }:
         <DialogFooter className="items-center sm:justify-between">
           <div>
             {hasEntry && (
-              <Button type="button" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={onDelete}>
+              <Button type="button" variant="ghost" disabled={saving} className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={onDelete}>
                 <Trash2 className="mr-2 h-4 w-4" />
                 Clear day
               </Button>
             )}
           </div>
           <div className="flex gap-2">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="button" onClick={() => onSave(score, note.trim())}>
-              Save day
+            <Button type="button" disabled={saving} onClick={() => onSave(score, note.trim())}>
+              {saving ? "Saving…" : "Save day"}
             </Button>
           </div>
         </DialogFooter>

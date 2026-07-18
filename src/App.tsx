@@ -1,4 +1,4 @@
-import { ChangeEvent, useMemo, useRef, useState } from "react"
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   addDays,
   addMonths,
@@ -16,10 +16,10 @@ import {
 import {
   ChevronLeft,
   ChevronRight,
+  Database,
   Download,
   FileJson,
   Leaf,
-  LockKeyhole,
   Plus,
   RotateCcw,
   Upload,
@@ -28,7 +28,7 @@ import {
 import { DayEditor } from "@/components/day-editor"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { downloadData, isValidImport, loadData, saveData, type DaytrackerData } from "@/lib/storage"
+import { downloadData, emptyData, isValidImport, loadData, saveData, type DaytrackerData } from "@/lib/storage"
 import { cn } from "@/lib/utils"
 
 const weekdays = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
@@ -64,12 +64,32 @@ function dateKey(date: Date) {
 }
 
 export default function App() {
-  const [data, setData] = useState<DaytrackerData>(() => loadData())
+  const [data, setData] = useState<DaytrackerData>(emptyData)
+  const [serverStatus, setServerStatus] = useState<"loading" | "connected" | "error">("loading")
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [month, setMonth] = useState(() => startOfMonth(new Date()))
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
   const [notice, setNotice] = useState("")
   const importRef = useRef<HTMLInputElement>(null)
+
+  const refreshData = useCallback(async () => {
+    setServerStatus("loading")
+    try {
+      const serverData = await loadData()
+      setData(serverData)
+      setHasLoaded(true)
+      setServerStatus("connected")
+    } catch {
+      setHasLoaded(false)
+      setServerStatus("error")
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshData()
+  }, [refreshData])
 
   const calendarDays = useMemo(() => {
     const start = startOfWeek(startOfMonth(month), { weekStartsOn: 1 })
@@ -91,17 +111,30 @@ export default function App() {
     ? scoredDays.reduce((sum, entry) => sum + (entry.score ?? 0), 0) / scoredDays.length
     : null
 
-  function commit(nextData: DaytrackerData) {
-    setData(nextData)
-    saveData(nextData)
+  async function commit(nextData: DaytrackerData) {
+    setSaving(true)
+    try {
+      await saveData(nextData)
+      setData(nextData)
+      setServerStatus("connected")
+      return true
+    } catch {
+      setServerStatus("error")
+      setNotice("Couldn’t save to the server — please retry")
+      window.setTimeout(() => setNotice(""), 3000)
+      return false
+    } finally {
+      setSaving(false)
+    }
   }
 
   function openDay(date: Date) {
+    if (!hasLoaded) return
     setSelectedDate(date)
     setEditorOpen(true)
   }
 
-  function saveDay(score: number | null, note: string) {
+  async function saveDay(score: number | null, note: string) {
     if (!selectedDate) return
     const key = dateKey(selectedDate)
     const nextDays = { ...data.days }
@@ -112,17 +145,17 @@ export default function App() {
       nextDays[key] = { score, note, updatedAt: new Date().toISOString() }
     }
 
-    commit({ version: 1, days: nextDays })
+    if (!(await commit({ version: 1, days: nextDays }))) return
     setEditorOpen(false)
     setNotice("Day saved")
     window.setTimeout(() => setNotice(""), 1800)
   }
 
-  function deleteDay() {
+  async function deleteDay() {
     if (!selectedDate) return
     const nextDays = { ...data.days }
     delete nextDays[dateKey(selectedDate)]
-    commit({ version: 1, days: nextDays })
+    if (!(await commit({ version: 1, days: nextDays }))) return
     setEditorOpen(false)
     setNotice("Day cleared")
     window.setTimeout(() => setNotice(""), 1800)
@@ -131,12 +164,12 @@ export default function App() {
   async function importFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ""
-    if (!file) return
+    if (!file || !hasLoaded || saving) return
 
     try {
       const parsed: unknown = JSON.parse(await file.text())
       if (!isValidImport(parsed)) throw new Error("Invalid backup")
-      commit(parsed)
+      if (!(await commit(parsed))) return
       setNotice("Backup imported")
     } catch {
       setNotice("That file isn’t a valid Daymark backup")
@@ -160,11 +193,18 @@ export default function App() {
               <div>
                 <div className="text-lg font-semibold leading-none tracking-tight">Daymark</div>
                 <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
-                  <LockKeyhole className="h-3 w-3" /> Stored only on this device
+                  <Database className="h-3 w-3" />
+                  {serverStatus === "connected" && "Stored in the shared server file"}
+                  {serverStatus === "loading" && "Loading server data…"}
+                  {serverStatus === "error" && (
+                    <button type="button" className="underline underline-offset-2" onClick={() => void refreshData()}>
+                      Server unavailable · retry
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
-            <Button className="lg:hidden" size="sm" onClick={() => openDay(new Date())}>
+            <Button className="lg:hidden" size="sm" disabled={!hasLoaded || saving} onClick={() => openDay(new Date())}>
               <Plus className="mr-1.5 h-4 w-4" /> Today
             </Button>
           </div>
@@ -184,7 +224,7 @@ export default function App() {
           <div className="hidden items-center gap-2 lg:flex">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Import JSON backup" onClick={() => importRef.current?.click()}>
+                <Button variant="ghost" size="icon" disabled={!hasLoaded || saving} aria-label="Import JSON backup" onClick={() => importRef.current?.click()}>
                   <Upload className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
@@ -192,13 +232,13 @@ export default function App() {
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Export JSON backup" onClick={() => downloadData(data)}>
+                <Button variant="ghost" size="icon" disabled={!hasLoaded || saving} aria-label="Export JSON backup" onClick={() => downloadData(data)}>
                   <Download className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Export JSON backup</TooltipContent>
             </Tooltip>
-            <Button onClick={() => openDay(new Date())}>
+            <Button disabled={!hasLoaded || saving} onClick={() => openDay(new Date())}>
               <Plus className="mr-2 h-4 w-4" /> Log today
             </Button>
           </div>
@@ -259,6 +299,7 @@ export default function App() {
                 <button
                   type="button"
                   key={key}
+                  disabled={!hasLoaded || saving}
                   onClick={() => openDay(day)}
                   className={cn(
                     "group relative flex min-h-24 flex-col border-border/70 p-2 text-left transition-all focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:min-h-28 sm:p-3",
@@ -311,10 +352,10 @@ export default function App() {
               ))}
             </div>
             <div className="flex gap-1">
-              <Button variant="ghost" size="sm" onClick={() => importRef.current?.click()}>
+              <Button variant="ghost" size="sm" disabled={!hasLoaded || saving} onClick={() => importRef.current?.click()}>
                 <Upload className="mr-1.5 h-4 w-4" /> Import
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => downloadData(data)}>
+              <Button variant="ghost" size="sm" disabled={!hasLoaded || saving} onClick={() => downloadData(data)}>
                 <FileJson className="mr-1.5 h-4 w-4" /> Export
               </Button>
             </div>
@@ -334,6 +375,7 @@ export default function App() {
           onOpenChange={setEditorOpen}
           onSave={saveDay}
           onDelete={deleteDay}
+          saving={saving}
         />
       </main>
     </TooltipProvider>
