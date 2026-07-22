@@ -32,7 +32,7 @@ const scoreStyles = [
   "bg-amber-400 text-stone-950 border-amber-400",
   "bg-yellow-300 text-stone-950 border-yellow-300",
   "bg-lime-300 text-stone-950 border-lime-300",
-  "bg-lime-400 text-stone-950 border-lime-400",
+  "bg-green-400 text-stone-950 border-green-400",
   "bg-emerald-400 text-stone-950 border-emerald-400",
   "bg-emerald-500 text-white border-emerald-500",
   "bg-teal-600 text-white border-teal-600",
